@@ -107,19 +107,6 @@ pub fn calc_dir_size(path: &Path) -> io::Result<u64> {
     Ok(size)
 }
 
-struct ReadWithProgress<'a> {
-    file: &'a mut File,
-    pb: &'a ProgressBar,
-}
-
-impl<'a> Read for ReadWithProgress<'a> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let n = self.file.read(buf)?;
-        self.pb.inc(n as u64);
-        Ok(n)
-    }
-}
-
 fn append_dir_with_progress(
     tar_builder: &mut Builder<Encoder<BufWriter<File>>>,
     path: &Path,
@@ -136,14 +123,26 @@ fn append_dir_with_progress(
         let size = fs::metadata(path)?.len();
 
         let mut header = tar::Header::new_gnu();
-        let relative_path = path.strip_prefix(input_root)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        header.set_path(relative_path)?;
         header.set_size(size);
         header.set_cksum();
 
+        let relative_path = path.strip_prefix(input_root)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+        struct ReadWithProgress<'a> {
+            file: &'a mut File,
+            pb: &'a ProgressBar,
+        }
+        impl<'a> Read for ReadWithProgress<'a> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                let n = self.file.read(buf)?;
+                self.pb.inc(n as u64);
+                Ok(n)
+            }
+        }
         let mut reader = ReadWithProgress { file: &mut f, pb };
-        tar_builder.append(&header, &mut reader)?;
+
+        tar_builder.append_data(&mut header, relative_path, &mut reader)?;
     }
     Ok(())
 }
