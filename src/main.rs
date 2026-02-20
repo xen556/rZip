@@ -21,6 +21,8 @@ fn main() -> io::Result<()> {
             let mut default = args.input_path.clone();
             if default.ends_with(".zst") {
                 default.truncate(default.len() - 4);
+            } else if default.ends_with(".zip") {
+                default.truncate(default.len() - 4);
             }
             default
         });

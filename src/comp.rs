@@ -5,6 +5,7 @@ use zstd::stream::Decoder;
 use tar::{Archive, Builder};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
+use zip::ZipArchive;
 
 pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io::Result<()> {
 
@@ -69,12 +70,20 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
 }
 
 pub fn extract(input_path: &str, output_path: &str) -> io::Result<()> {
+    let ext = Path::new(input_path).extension().and_then(|e| e.to_str()).unwrap_or("");
     let mut input_file = File::open(input_path)?;
     let mut header = [0u8; 5];
     input_file.read_exact(&mut header)?;
 
     let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
     let decoder = Decoder::new(reader)?;
+
+    if ext.eq_ignore_ascii_case("zip") {
+        return extract_zip(input_path, output_path);
+    } else if ext.eq_ignore_ascii_case("rar") {
+        //return extract_rar(input_path, output_path);
+        println!("tkjaskltjskg");
+    }
 
     match &header {
         b"RZIPF" => {
@@ -143,6 +152,28 @@ fn append_dir_with_progress(
         let mut reader = ReadWithProgress { file: &mut f, pb };
 
         tar_builder.append_data(&mut header, relative_path, &mut reader)?;
+    }
+    Ok(())
+}
+
+pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
+    let file = File::open(input_path)?;
+    let mut archive = ZipArchive::new(file)?;
+    
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let outpath = std::path::Path::new(output_path).join(file.mangled_name());
+
+        if file.is_dir() {
+            std::fs::create_dir_all(&outpath)?;
+        }
+        else {
+            if let Some(p) = outpath.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            let mut outfile = File::create(&outpath)?;
+            io::copy(&mut file, &mut outfile)?;
+        }
     }
     Ok(())
 }
