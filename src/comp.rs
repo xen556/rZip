@@ -15,7 +15,7 @@ pub fn compress(input_path: &str, output_path: &str, comp_lvl: i32) -> io::Resul
     if metadata.is_file() {
         let mut input = File::open(input_path)?;
         let mut output = File::create(output_path)?;
-        output.write_all(b"RZIPF")?;
+        output.write_all(b"RZIPF\x01")?;
         let writer = BufWriter::with_capacity(32 * 1024 * 1024, output);
         let mut encoder = Encoder::new(writer, comp_lvl)?;
         encoder.include_checksum(true)?;
@@ -43,7 +43,7 @@ pub fn compress(input_path: &str, output_path: &str, comp_lvl: i32) -> io::Resul
     }
 
     let mut output = File::create(output_path)?;
-    output.write_all(b"RZIPD")?;
+    output.write_all(b"RZIPD\x01")?;
     let writer = BufWriter::with_capacity(32 * 1024 * 1024, output);
     let mut encoder = Encoder::new(writer, comp_lvl)?;
     encoder.include_checksum(true)?;
@@ -69,37 +69,39 @@ pub fn compress(input_path: &str, output_path: &str, comp_lvl: i32) -> io::Resul
 pub fn extract(input_path: &str, output_path: &str) -> io::Result<()> {
     let mut input_file = File::open(input_path)?;
 
-    let mut header = [0u8; 6];
+    let mut header = [0u8; 8];
     input_file.read_exact(&mut header)?;
 
-    // RZIP
-    if &header[..5] == b"RZIPF" {
-        let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
-        let mut decoder = Decoder::new(reader)?;
-        let mut output = File::create(output_path)?;
-        copy(&mut decoder, &mut output)?;
-        return Ok(());
-    }
+    match detect_format(&header) {
+        Some(ArchiveFormat::RzipFile) => {
+            let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
+            let mut decoder = Decoder::new(reader)?;
+            let mut output = File::create(output_path)?;
+            copy(&mut decoder, &mut output)?;
+            Ok(())
+        }
 
-    if &header[..5] == b"RZIPD" {
-        let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
-        let decoder = Decoder::new(reader)?;
-        let mut archive = Archive::new(decoder);
-        archive.unpack(output_path)?;
-        return Ok(());
-    }
+        Some(ArchiveFormat::RzipDir) => {
+            let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
+            let decoder = Decoder::new(reader)?;
+            let mut archive = Archive::new(decoder);
+            archive.unpack(output_path)?;
+            Ok(())
+        }
 
-    // ZIP
-    if &header[..2] == b"PK" {
-        return extract_zip(input_path, output_path);
-    }
+        Some(ArchiveFormat::Zip) => {
+            extract_zip(input_path, output_path)
+        }
 
-    // RAR
-    if &header[..4] == b"Rar!" {
-        return extract_rar(input_path, output_path);
-    }
+        Some(ArchiveFormat::Rar) => {
+            extract_rar(input_path, output_path)
+        }
 
-    Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown archive format"))
+        None => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Unknown archive format",
+        )),
+    }
 }
 
 pub fn calc_dir_size(path: &Path) -> io::Result<u64> {
@@ -116,7 +118,7 @@ pub fn calc_dir_size(path: &Path) -> io::Result<u64> {
     Ok(size)
 }
 
-fn append_dir_with_progress(
+pub fn append_dir_with_progress(
     tar_builder: &mut Builder<Encoder<BufWriter<File>>>,
     path: &Path,
     input_root: &Path,
@@ -212,4 +214,33 @@ pub fn extract_rar(input_path: &str, output_path: &str) -> io::Result<()> {
     }
 
     Ok(())
+}
+
+enum ArchiveFormat {
+    RzipFile,
+    RzipDir,
+    Zip,
+    Rar,
+}
+
+fn detect_format(header: &[u8]) -> Option<ArchiveFormat> {
+    if &header[..5] == b"RZIPF\x01" {
+        return Some(ArchiveFormat::RzipFile);
+    }
+
+    if &header[..5] == b"RZIPD\x01" {
+        return Some(ArchiveFormat::RzipDir);
+    }
+
+    if &header[..4] == b"PK\x03\x04"
+        || &header[..4] == b"PK\x05\x06"
+        || &header[..4] == b"PK\x07\x08"
+    {
+        return Some(ArchiveFormat::Zip);
+    }
+
+    if header.starts_with(b"Rar!\x1A\x07") {
+        return Some(ArchiveFormat::Rar);
+    }
+    None
 }

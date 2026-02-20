@@ -80,3 +80,9 @@ struct Args {
     #[arg(long, default_value = "balanced")]
     compress_profile: String,
 }
+
+pub enum OverwriteMode {
+    Ask,
+    Always,
+    Never,
+}
