@@ -6,7 +6,7 @@ use tar::{Archive, Builder};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 use zip::ZipArchive;
-use std::process::{Command, Stdio};
+use std::process::{Stdio, Command};
 
 pub fn compress(input_path: &str, output_path: &str, comp_lvl: i32) -> io::Result<()> {
 
@@ -179,20 +179,24 @@ pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
 }
 
 pub fn extract_rar(input_path: &str, output_path: &str) -> io::Result<()> {
+    fs::create_dir_all(output_path)?;
+
     let status = Command::new("unrar")
         .arg("x")
         .arg("-o+")
+        .arg("-idq") 
         .arg(input_path)
         .arg(output_path)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()?;
-    
+
     if !status.success() {
         return Err(io::Error::new(
             io::ErrorKind::Other,
-            "RAR extraction failed (is unrar installed?)"
+            format!("unrar failed with status: {}", status),
         ));
     }
+
     Ok(())
 }

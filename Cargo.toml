@@ -8,5 +8,6 @@ clap = { version = "4.5.59", features = ["derive"] }
 indicatif = "0.18.4"
 num_cpus = "1.17.0"
 tar = "0.4.44"
+unrar = "0.5.8"
 zip = "8.1.0"
 zstd = { version = "0.13.3", features = ["zstdmt"] }
