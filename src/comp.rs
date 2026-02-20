@@ -179,6 +179,19 @@ pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
 }
 
 pub fn extract_rar(input_path: &str, output_path: &str) -> io::Result<()> {
+    if Path::new(output_path).exists() {
+        let mut entries = fs::read_dir(output_path)?;
+        if entries.next().is_some() {
+            println!("Output directory is not empty. Overwrite? (y/n)");
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+
+            if input.trim().to_lowercase() != "y" {
+                return Ok(());
+            }
+        }
+    }
     fs::create_dir_all(output_path)?;
 
     let status = Command::new("unrar")
