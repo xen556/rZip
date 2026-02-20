@@ -6,12 +6,9 @@ use tar::{Archive, Builder};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::Path;
 use zip::ZipArchive;
+use std::process::{Command, Stdio};
 
-pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io::Result<()> {
-
-    if !(1..=22).contains(&compress_level) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid compression level (max 22)!"));
-    }
+pub fn compress(input_path: &str, output_path: &str, comp_lvl: i32) -> io::Result<()> {
 
     let metadata = fs::metadata(input_path)?;
 
@@ -20,7 +17,7 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
         let mut output = File::create(output_path)?;
         output.write_all(b"RZIPF")?;
         let writer = BufWriter::with_capacity(32 * 1024 * 1024, output);
-        let mut encoder = Encoder::new(writer, compress_level)?;
+        let mut encoder = Encoder::new(writer, comp_lvl)?;
         encoder.include_checksum(true)?;
         encoder.multithread(num_cpus::get() as u32)?;
         let mut buffer = vec![0u8; 32 * 1024 * 1024];
@@ -48,7 +45,7 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
     let mut output = File::create(output_path)?;
     output.write_all(b"RZIPD")?;
     let writer = BufWriter::with_capacity(32 * 1024 * 1024, output);
-    let mut encoder = Encoder::new(writer, compress_level)?;
+    let mut encoder = Encoder::new(writer, comp_lvl)?;
     encoder.include_checksum(true)?;
     encoder.multithread(num_cpus::get() as u32)?;
 
@@ -70,36 +67,39 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
 }
 
 pub fn extract(input_path: &str, output_path: &str) -> io::Result<()> {
-    let ext = Path::new(input_path).extension().and_then(|e| e.to_str()).unwrap_or("");
     let mut input_file = File::open(input_path)?;
-    let mut header = [0u8; 5];
+
+    let mut header = [0u8; 6];
     input_file.read_exact(&mut header)?;
 
-    let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
-    let decoder = Decoder::new(reader)?;
+    // RZIP
+    if &header[..5] == b"RZIPF" {
+        let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
+        let mut decoder = Decoder::new(reader)?;
+        let mut output = File::create(output_path)?;
+        copy(&mut decoder, &mut output)?;
+        return Ok(());
+    }
 
-    if ext.eq_ignore_ascii_case("zip") {
+    if &header[..5] == b"RZIPD" {
+        let reader = BufReader::with_capacity(32 * 1024 * 1024, input_file);
+        let decoder = Decoder::new(reader)?;
+        let mut archive = Archive::new(decoder);
+        archive.unpack(output_path)?;
+        return Ok(());
+    }
+
+    // ZIP
+    if &header[..2] == b"PK" {
         return extract_zip(input_path, output_path);
-    } else if ext.eq_ignore_ascii_case("rar") {
-        //return extract_rar(input_path, output_path);
-        println!("tkjaskltjskg");
     }
 
-    match &header {
-        b"RZIPF" => {
-            let mut output = File::create(output_path)?;
-            let mut decoder = decoder;
-            copy(&mut decoder, &mut output)?;
-        }
-        b"RZIPD" => {
-            let mut archive = Archive::new(decoder);
-            archive.unpack(output_path)?;
-        }
-        _ => {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid archive format"));
-        }
+    // RAR
+    if &header[..4] == b"Rar!" {
+        return extract_rar(input_path, output_path);
     }
-    Ok(())
+
+    Err(io::Error::new(io::ErrorKind::InvalidData, "Unknown archive format"))
 }
 
 pub fn calc_dir_size(path: &Path) -> io::Result<u64> {
@@ -174,6 +174,25 @@ pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
             let mut outfile = File::create(&outpath)?;
             io::copy(&mut file, &mut outfile)?;
         }
+    }
+    Ok(())
+}
+
+pub fn extract_rar(input_path: &str, output_path: &str) -> io::Result<()> {
+    let status = Command::new("unrar")
+        .arg("x")
+        .arg("-o+")
+        .arg(input_path)
+        .arg(output_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            "RAR extraction failed (is unrar installed?)"
+        ));
     }
     Ok(())
 }
