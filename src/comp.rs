@@ -4,6 +4,7 @@ use zstd::stream::Encoder;
 use zstd::stream::Decoder;
 use tar::{Builder, Archive};
 use std::io::copy;
+use indicatif::{ProgressBar, ProgressStyle};
 
 pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io::Result<()> {
 
@@ -19,7 +20,23 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
         output.write_all(b"RZIPF")?;
         let mut encoder = Encoder::new(output, compress_level)?;
         encoder.multithread(num_cpus::get() as u32)?;
-        copy(&mut input, &mut encoder)?;
+        let mut buffer = vec![0u8; 16 * 1024 * 1024];
+        let pb = ProgressBar::new(metadata.len());
+        pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40.white} {bytes}/{total_bytes} ({percent}%)")
+            .unwrap()
+        );
+        loop {
+            let bytes_read = input.read(&mut buffer)?;
+            if bytes_read == 0 {
+                break;
+            }
+            encoder.write_all(&buffer[..bytes_read])?;
+            pb.inc(bytes_read as u64);
+        }
+        pb.finish();
+
         encoder.finish()?;
         return Ok(());
     }
