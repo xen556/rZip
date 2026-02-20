@@ -1,14 +1,14 @@
 use std::fs::{self, File};
-use std::io::{self, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write, copy};
 use zstd::stream::Encoder;
 use zstd::stream::Decoder;
-use tar::{Builder, Archive};
-use std::io::copy;
+use tar::{Archive, Builder};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::Path;
 
 pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io::Result<()> {
 
-    if compress_level < 1 || compress_level > 22 {
+    if !(1..=22).contains(&compress_level) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid compression level (max 22)!"));
     }
 
@@ -18,9 +18,12 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
         let mut input = File::open(input_path)?;
         let mut output = File::create(output_path)?;
         output.write_all(b"RZIPF")?;
-        let mut encoder = Encoder::new(output, compress_level)?;
+        let writer = BufWriter::with_capacity(16 * 1024 * 1024, output);
+        let mut encoder = Encoder::new(writer, compress_level)?;
+        encoder.include_checksum(true)?;
         encoder.multithread(num_cpus::get() as u32)?;
         let mut buffer = vec![0u8; 16 * 1024 * 1024];
+
         let pb = ProgressBar::new(metadata.len());
         pb.set_style(
         ProgressStyle::default_bar()
@@ -45,7 +48,16 @@ pub fn compress(input_path: &str, output_path: &str, compress_level: i32) -> io:
     output.write_all(b"RZIPD")?;
     let writer = BufWriter::with_capacity(16 * 1024 * 1024, output);
     let mut encoder = Encoder::new(writer, compress_level)?;
+    encoder.include_checksum(true)?;
     encoder.multithread(num_cpus::get() as u32)?;
+
+    let total_size = calc_dir_size(Path::new(input_path))?;
+    let pb = ProgressBar::new(total_size);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40.white} {bytes}/{total_bytes} ({percent}%)")
+            .unwrap()
+    );
 
     {
         let mut tar_builder = Builder::new(&mut encoder);
@@ -80,4 +92,18 @@ pub fn extract(input_path: &str, output_path: &str) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+pub fn calc_dir_size(path: &Path) -> io::Result<u64> {
+    let mut size = 0;    
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            size += calc_dir_size(&path)?;
+        }
+    } else if path.is_file() {
+        size += fs::metadata(path)?.len();
+    }
+    Ok(size)
 }
