@@ -389,10 +389,10 @@ pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
         .into_iter()
         .enumerate()
         .filter(|(_, (_, is_dir, _, _))| !is_dir)
-        .map(|(i, (path, _, size, mode))| (i, path, size, mode))
+        .map(|(i, (path, _, size, mode))| (i, path, size, mode as Option<u32>))
         .collect();
 
-    file_entries.par_iter().for_each(|(i, outpath, size, unix_mode)| {
+    file_entries.par_iter().for_each(|(i, outpath, size, _unix_mode)| {
         let result = (|| -> io::Result<()> {
             let file = File::open(input_path_arc.as_str())?;
             let mut archive = ZipArchive::new(file)?;
@@ -402,7 +402,7 @@ pub fn extract_zip(input_path: &str, output_path: &str) -> io::Result<()> {
             pb_arc.inc(*size);
 
             #[cfg(unix)]
-            if let Some(mode) = unix_mode {
+            if let Some(mode) = _unix_mode {
                 use std::os::unix::fs::PermissionsExt;
                 fs::set_permissions(outpath, fs::Permissions::from_mode(*mode))?;
             }
